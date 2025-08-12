@@ -54,32 +54,49 @@
   function fbSignOut() { return signOut(auth); }
 
   // Resilient list with fallbacks + placeholders
-  async function fbListInfluencers() {
-    try {
-      const q1 = query(
-        collection(db, "profiles"),
-        where("role","==","influencer"),
-        orderBy("name")
-      );
-      const snap1 = await getDocs(q1);
-      const real1 = snap1.docs.map(d => ({ id: d.id, ...d.data() }));
-      return real1.length ? real1 : (window.PLACEHOLDER_INFLUENCERS || []);
-    } catch (err) {
-      console.warn("fbListInfluencers fallback A (orderBy failed):", err?.message || err);
-      try {
-        const q2 = query(collection(db, "profiles"), where("role","==","influencer"));
-        const snap2 = await getDocs(q2);
-        const real2 = snap2.docs.map(d => ({ id: d.id, ...d.data() }))
-          .sort((a,b)=> (a.name||"").localeCompare(b.name||""));
-        return real2.length ? real2 : (window.PLACEHOLDER_INFLUENCERS || []);
-      } catch (err2) {
-        console.warn("fbListInfluencers fallback B (full scan):", err2?.message || err2);
-        const snap3 = await getDocs(collection(db, "profiles"));
-        const all = snap3.docs.map(d => ({ id: d.id, ...d.data() }));
-        const real3 = all.filter(x=>x.role==="influencer")
-          .sort((a,b)=> (a.name||"").localeCompare(b.name||""));
-        return real3.length ? real3 : (window.PLACEHOLDER_INFLUENCERS || []);
-      }
+// Always returns an array. On any error, returns placeholders.
+async function fbListInfluencers() {
+  const PH = (window.PLACEHOLDER_INFLUENCERS || []);
+  try {
+    // Fast path: where + orderBy
+    const q1 = query(
+      collection(db, "profiles"),
+      where("role","==","influencer"),
+      orderBy("name")
+    );
+    const snap1 = await getDocs(q1);
+    const real1 = snap1.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (real1.length) return real1;
+  } catch (e) {
+    console.warn("List A failed (needs index or rules):", e?.message || e);
+  }
+
+  try {
+    // Fallback: where only (no composite index required)
+    const q2 = query(collection(db, "profiles"), where("role","==","influencer"));
+    const snap2 = await getDocs(q2);
+    const real2 = snap2.docs.map(d => ({ id: d.id, ...d.data() }))
+      .sort((a,b)=> (a.name||"").localeCompare(b.name||""));
+    if (real2.length) return real2;
+  } catch (e) {
+    console.warn("List B failed:", e?.message || e);
+  }
+
+  try {
+    // Last resort: read all and filter client‑side
+    const snap3 = await getDocs(collection(db, "profiles"));
+    const all = snap3.docs.map(d => ({ id: d.id, ...d.data() }));
+    const real3 = all.filter(x => x.role === "influencer")
+      .sort((a,b)=> (a.name||"").localeCompare(b.name||""));
+    if (real3.length) return real3;
+  } catch (e) {
+    console.warn("List C failed:", e?.message || e);
+  }
+
+  // If everything failed or DB empty, show placeholders.
+  return PH;
+}
+
     }
   }
 
@@ -333,7 +350,15 @@
       const [category, setCategory] = useState("all");
       const [myOrders, setMyOrders] = useState([]);
 
-      useEffect(() => { fb.listInfluencers().then(setInfluencers); }, []);
+useEffect(() => {
+  fb.listInfluencers()
+    .then((rows) => setInfluencers(rows && rows.length ? rows : (window.PLACEHOLDER_INFLUENCERS || [])))
+    .catch((e) => {
+      console.warn("ClientDashboard load error:", e?.message || e);
+      setInfluencers(window.PLACEHOLDER_INFLUENCERS || []);
+    });
+}, []);
+
       useEffect(() => { fb.myOrdersClient(me.uid).then(setMyOrders); }, [me.uid]);
 
       const filtered = influencers.filter((u) => {
@@ -612,31 +637,53 @@
     }
 
     function ExploreLoggedOut() {
-      const [influencers, setInfluencers] = useState([]);
-      useEffect(() => { fb.listInfluencers().then(setInfluencers); }, []);
-      return (
-        <div className="grid gap-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">Featured influencers</h3>
-            <span className="text-sm text-gray-500">Login to request</span>
-          </div>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {influencers.map((u)=> (
-              <div key={u.id} className="border rounded-2xl p-3">
-                <div className="flex gap-3">
-                  <div className="w-14 h-14 rounded-xl bg-gray-200"></div>
-                  <div>
-                    <div className="font-medium">{u.name}</div>
-                    <div className="text-xs text-gray-600">{u.bio}</div>
-                  </div>
-                </div>
-                <div className="mt-2 text-sm">Video <span className="font-medium"><Money v={u.rates?.video||0} /></span></div>
+  const [influencers, setInfluencers] = useState([]);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    fb.listInfluencers()
+      .then((rows) => {
+        if (!rows || rows.length === 0) {
+          setInfluencers(window.PLACEHOLDER_INFLUENCERS || []);
+        } else {
+          setInfluencers(rows);
+        }
+      })
+      .catch((e) => {
+        console.warn("ExploreLoggedOut load error:", e?.message || e);
+        setErr("Couldn’t load from Firestore, showing demo profiles.");
+        setInfluencers(window.PLACEHOLDER_INFLUENCERS || []);
+      });
+  }, []);
+
+  return (
+    <div className="grid gap-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Featured influencers</h3>
+        <span className="text-sm text-gray-500">Login to request</span>
+      </div>
+      {err && <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 p-2 rounded">{err}</div>}
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {influencers.map((u)=> (
+          <div key={u.id} className="border rounded-2xl p-3">
+            <div className="flex gap-3">
+              <div className="w-14 h-14 rounded-xl bg-gray-200"></div>
+              <div>
+                <div className="font-medium">{u.name}</div>
+                <div className="text-xs text-gray-600">{u.bio}</div>
               </div>
-            ))}
+            </div>
+            <div className="mt-2 text-sm">
+              Video <span className="font-medium"><Money v={u.rates?.video||0} /></span>
+            </div>
           </div>
-        </div>
-      );
-    }
+        ))}
+        {influencers.length === 0 && <p className="text-sm text-gray-500">No profiles yet.</p>}
+      </div>
+    </div>
+  );
+}
+
 
     function Row({label, value}) { return (<div className="flex items-center justify-between text-sm"><span>{label}</span><span>{value}</span></div>); }
     function Input({label, value, onChange, className=""}) { return (<div className={"grid gap-1 "+className}><label className="text-sm">{label}</label><input className="border rounded-xl p-2" value={value} onChange={e=>onChange(e.target.value)} /></div>); }
