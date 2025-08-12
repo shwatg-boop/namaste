@@ -12,97 +12,175 @@
 
   <!-- Firebase (ES Modules via <script type=module>) -->
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-    import {
-      getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut
-    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-    import {
-      getFirestore, doc, setDoc, getDoc, addDoc, getDocs, updateDoc, collection, query, where, orderBy, serverTimestamp
-    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+  import {
+    getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut
+  } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+  import {
+    getFirestore, doc, setDoc, getDoc, addDoc, getDocs, updateDoc,
+    collection, query, where, orderBy, serverTimestamp
+  } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-    // >>>>>> PASTE YOUR FIREBASE CONFIG HERE <<<<<<
-   // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-    const firebaseConfig = {
-      apiKey: "AIzaSyAwRXJkjgf8zTyzx1gtQrY-lkWERRmagi8",
-      authDomain: "namaste-14425.firebaseapp.com",
-      projectId: "namaste-14425",
-      storageBucket: "namaste-14425.firebasestorage.app",
-      messagingSenderId: "217856135534",
-      appId: "1:217856135534:web:53ae85886c555e0134317f",
-      measurementId: "G-EL1K3LTZMY"
-    };
+  // Your Firebase config
+  const firebaseConfig = {
+    apiKey: "AIzaSyAwRXJkjgf8zTyzx1gtQrY-lkWERRmagi8",
+    authDomain: "namaste-14425.firebaseapp.com",
+    projectId: "namaste-14425",
+    storageBucket: "namaste-14425.firebasestorage.app",
+    messagingSenderId: "217856135534",
+    appId: "1:217856135534:web:53ae85886c555e0134317f",
+    measurementId: "G-EL1K3LTZMY"
+  };
 
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
 
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
+  // --- API used by the React app ---
+  async function fbSignUp(email, password, role, name) {
+    const cred = await createUserWithEmailAndPassword(auth, email, password);
+    const uid = cred.user.uid;
+    await setDoc(doc(db, "profiles", uid), {
+      role, name, handle: null, bio: "", city: "",
+      categories: [], platforms: ["instagram","tiktok","youtube"],
+      rates: { video: 2000, socialPost: 5000, liveCall: 3000 },
+      socialAddOn: { instagram: 3000, tiktok: 2000, youtube: 4000 },
+      minLeadDays: 2, avatarUrl: "", createdAt: serverTimestamp()
+    });
+    return uid;
+  }
+  function fbSignIn(email, password) { return signInWithEmailAndPassword(auth, email, password); }
+  function fbOnAuth(fn) { return onAuthStateChanged(auth, fn); }
+  function fbSignOut() { return signOut(auth); }
 
-    // Expose a tiny API the React app will call
-    async function fbSignUp(email, password, role, name) {
-      const cred = await createUserWithEmailAndPassword(auth, email, password);
-      const uid = cred.user.uid;
-      // Make starter profile
-      await setDoc(doc(db, "profiles", uid), {
-        role, name, handle: null, bio: "", city: "",
-        categories: [], platforms: ["instagram","tiktok","youtube"],
-        rates: { video: 2000, socialPost: 5000, liveCall: 3000 },
-        socialAddOn: { instagram: 3000, tiktok: 2000, youtube: 4000 },
-        minLeadDays: 2, avatarUrl: "", createdAt: serverTimestamp()
-      });
-      return uid;
+  // Resilient list with fallbacks + placeholders
+  async function fbListInfluencers() {
+    try {
+      const q1 = query(
+        collection(db, "profiles"),
+        where("role","==","influencer"),
+        orderBy("name")
+      );
+      const snap1 = await getDocs(q1);
+      const real1 = snap1.docs.map(d => ({ id: d.id, ...d.data() }));
+      return real1.length ? real1 : (window.PLACEHOLDER_INFLUENCERS || []);
+    } catch (err) {
+      console.warn("fbListInfluencers fallback A (orderBy failed):", err?.message || err);
+      try {
+        const q2 = query(collection(db, "profiles"), where("role","==","influencer"));
+        const snap2 = await getDocs(q2);
+        const real2 = snap2.docs.map(d => ({ id: d.id, ...d.data() }))
+          .sort((a,b)=> (a.name||"").localeCompare(b.name||""));
+        return real2.length ? real2 : (window.PLACEHOLDER_INFLUENCERS || []);
+      } catch (err2) {
+        console.warn("fbListInfluencers fallback B (full scan):", err2?.message || err2);
+        const snap3 = await getDocs(collection(db, "profiles"));
+        const all = snap3.docs.map(d => ({ id: d.id, ...d.data() }));
+        const real3 = all.filter(x=>x.role==="influencer")
+          .sort((a,b)=> (a.name||"").localeCompare(b.name||""));
+        return real3.length ? real3 : (window.PLACEHOLDER_INFLUENCERS || []);
+      }
     }
-    function fbSignIn(email, password) {
-      return signInWithEmailAndPassword(auth, email, password);
-    }
-    function fbOnAuth(fn) { return onAuthStateChanged(auth, fn); }
-    function fbSignOut() { return signOut(auth); }
+  }
 
-    async function fbListInfluencers() {
-      const q = query(collection(db, "profiles"), where("role","==","influencer"), orderBy("name"));
-      const snap = await getDocs(q);
-      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    }
-    async function fbMyOrdersClient(uid) {
-      const q = query(collection(db, "orders"), where("clientId","==",uid), orderBy("createdAt","desc"));
-      const snap = await getDocs(q);
-      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    }
-    async function fbMyOrdersInfluencer(uid) {
-      const q = query(collection(db, "orders"), where("influencerId","==",uid), orderBy("createdAt","desc"));
-      const snap = await getDocs(q);
-      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    }
-    async function fbCreateOrder(order) {
-      const ref = await addDoc(collection(db, "orders"), { ...order, createdAt: serverTimestamp() });
-      const docSnap = await getDoc(ref);
-      return { id: ref.id, ...docSnap.data() };
-    }
-    async function fbSetOrderStatus(orderId, status) {
-      await updateDoc(doc(db, "orders", orderId), { status });
-    }
-    async function fbGetProfile(uid) {
-      const d = await getDoc(doc(db, "profiles", uid));
-      return d.exists() ? { id: d.id, ...d.data() } : null;
-    }
-    async function fbUpdateProfile(uid, patch) {
-      await updateDoc(doc(db, "profiles", uid), patch);
-    }
+  async function fbMyOrdersClient(uid) {
+    const q = query(collection(db, "orders"), where("clientId","==",uid), orderBy("createdAt","desc"));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  }
+  async function fbMyOrdersInfluencer(uid) {
+    const q = query(collection(db, "orders"), where("influencerId","==",uid), orderBy("createdAt","desc"));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  }
+  async function fbCreateOrder(order) {
+    const ref = await addDoc(collection(db, "orders"), { ...order, createdAt: serverTimestamp() });
+    const docSnap = await getDoc(ref);
+    return { id: ref.id, ...docSnap.data() };
+  }
+  async function fbSetOrderStatus(orderId, status) {
+    await updateDoc(doc(db, "orders", orderId), { status });
+  }
+  async function fbGetProfile(uid) {
+    const d = await getDoc(doc(db, "profiles", uid));
+    return d.exists() ? { id: d.id, ...d.data() } : null;
+  }
+  async function fbUpdateProfile(uid, patch) {
+    await updateDoc(doc(db, "profiles", uid), patch);
+  }
 
-    window.FirebaseAPI = {
-      auth, db,
-      signUp: fbSignUp,
-      signIn: fbSignIn,
-      onAuth: fbOnAuth,
-      signOut: fbSignOut,
-      listInfluencers: fbListInfluencers,
-      myOrdersClient: fbMyOrdersClient,
-      myOrdersInfluencer: fbMyOrdersInfluencer,
-      createOrder: fbCreateOrder,
-      setOrderStatus: fbSetOrderStatus,
-      getProfile: fbGetProfile,
-      updateProfile: fbUpdateProfile
-    };
-  </script>
+  window.FirebaseAPI = {
+    auth, db,
+    signUp: fbSignUp,
+    signIn: fbSignIn,
+    onAuth: fbOnAuth,
+    signOut: fbSignOut,
+    listInfluencers: fbListInfluencers,
+    myOrdersClient: fbMyOrdersClient,
+    myOrdersInfluencer: fbMyOrdersInfluencer,
+    createOrder: fbCreateOrder,
+    setOrderStatus: fbSetOrderStatus,
+    getProfile: fbGetProfile,
+    updateProfile: fbUpdateProfile
+  };
+
+  // --- Client-side placeholder influencers (used only if DB has none) ---
+  window.PLACEHOLDER_INFLUENCERS = [
+    {
+      id: "ph-1",
+      _placeholder: true,
+      name: "Sushila Rai",
+      handle: "@sushila.rai",
+      bio: "Singer • Birthday songs & pep talks",
+      city: "Kathmandu",
+      categories: ["Singer", "Entertainment"],
+      platforms: ["instagram", "tiktok"],
+      rates: { video: 2500, socialPost: 7000, liveCall: 3000 },
+      socialAddOn: { instagram: 4000, tiktok: 3000, youtube: 0 },
+      minLeadDays: 2
+    },
+    {
+      id: "ph-2",
+      _placeholder: true,
+      name: "Bikram Thapa",
+      handle: "@bikram.thapa",
+      bio: "Comedian • Light roasts & shoutouts",
+      city: "Lalitpur",
+      categories: ["Comedian"],
+      platforms: ["instagram", "youtube"],
+      rates: { video: 3000, socialPost: 9000, liveCall: 4000 },
+      socialAddOn: { instagram: 5000, tiktok: 0, youtube: 8000 },
+      minLeadDays: 3
+    },
+    {
+      id: "ph-3",
+      _placeholder: true,
+      name: "Anjana Gurung",
+      handle: "@anjana.g",
+      bio: "Dancer • Congrats & motivation",
+      city: "Bhaktapur",
+      categories: ["Dance", "Fitness"],
+      platforms: ["instagram", "tiktok"],
+      rates: { video: 2200, socialPost: 6500, liveCall: 2800 },
+      socialAddOn: { instagram: 3500, tiktok: 2500, youtube: 0 },
+      minLeadDays: 2
+    },
+    {
+      id: "ph-4",
+      _placeholder: true,
+      name: "Prakash Karki",
+      handle: "@prakash.k",
+      bio: "Actor • Birthday skits & wishes",
+      city: "Pokhara",
+      categories: ["Actor"],
+      platforms: ["instagram", "youtube"],
+      rates: { video: 4000, socialPost: 11000, liveCall: 5500 },
+      socialAddOn: { instagram: 6000, tiktok: 0, youtube: 9000 },
+      minLeadDays: 3
+    }
+  ];
+</script>
+
 </head>
 <body class="bg-gray-50">
   <div id="root"></div>
