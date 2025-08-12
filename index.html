@@ -26,7 +26,7 @@
     apiKey: "AIzaSyAwRXJkjgf8zTyzx1gtQrY-lkWERRmagi8",
     authDomain: "namaste-14425.firebaseapp.com",
     projectId: "namaste-14425",
-    storageBucket: "namaste-14425.firebasestorage.app",
+    storageBucket: "namaste-14425.appspot.com",   // <-- fixed domain
     messagingSenderId: "217856135534",
     appId: "1:217856135534:web:53ae85886c555e0134317f",
     measurementId: "G-EL1K3LTZMY"
@@ -53,51 +53,47 @@
   function fbOnAuth(fn) { return onAuthStateChanged(auth, fn); }
   function fbSignOut() { return signOut(auth); }
 
-  // Resilient list with fallbacks + placeholders
-// Always returns an array. On any error, returns placeholders.
-async function fbListInfluencers() {
-  const PH = (window.PLACEHOLDER_INFLUENCERS || []);
-  try {
-    // Fast path: where + orderBy
-    const q1 = query(
-      collection(db, "profiles"),
-      where("role","==","influencer"),
-      orderBy("name")
-    );
-    const snap1 = await getDocs(q1);
-    const real1 = snap1.docs.map(d => ({ id: d.id, ...d.data() }));
-    if (real1.length) return real1;
-  } catch (e) {
-    console.warn("List A failed (needs index or rules):", e?.message || e);
-  }
-
-  try {
-    // Fallback: where only (no composite index required)
-    const q2 = query(collection(db, "profiles"), where("role","==","influencer"));
-    const snap2 = await getDocs(q2);
-    const real2 = snap2.docs.map(d => ({ id: d.id, ...d.data() }))
-      .sort((a,b)=> (a.name||"").localeCompare(b.name||""));
-    if (real2.length) return real2;
-  } catch (e) {
-    console.warn("List B failed:", e?.message || e);
-  }
-
-  try {
-    // Last resort: read all and filter client‑side
-    const snap3 = await getDocs(collection(db, "profiles"));
-    const all = snap3.docs.map(d => ({ id: d.id, ...d.data() }));
-    const real3 = all.filter(x => x.role === "influencer")
-      .sort((a,b)=> (a.name||"").localeCompare(b.name||""));
-    if (real3.length) return real3;
-  } catch (e) {
-    console.warn("List C failed:", e?.message || e);
-  }
-
-  // If everything failed or DB empty, show placeholders.
-  return PH;
-}
-
+  // Always returns an array. On any error, returns placeholders.
+  async function fbListInfluencers() {
+    const PH = (window.PLACEHOLDER_INFLUENCERS || []);
+    try {
+      // Fast path: where + orderBy
+      const q1 = query(
+        collection(db, "profiles"),
+        where("role","==","influencer"),
+        orderBy("name")
+      );
+      const snap1 = await getDocs(q1);
+      const real1 = snap1.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (real1.length) return real1;
+    } catch (e) {
+      console.warn("List A failed (needs index or rules):", e?.message || e);
     }
+
+    try {
+      // Fallback: where only (no composite index required)
+      const q2 = query(collection(db, "profiles"), where("role","==","influencer"));
+      const snap2 = await getDocs(q2);
+      const real2 = snap2.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a,b)=> (a.name||"").localeCompare(b.name||""));
+      if (real2.length) return real2;
+    } catch (e) {
+      console.warn("List B failed:", e?.message || e);
+    }
+
+    try {
+      // Last resort: read all and filter client‑side
+      const snap3 = await getDocs(collection(db, "profiles"));
+      const all = snap3.docs.map(d => ({ id: d.id, ...d.data() }));
+      const real3 = all.filter(x => x.role === "influencer")
+        .sort((a,b)=> (a.name||"").localeCompare(b.name||""));
+      if (real3.length) return real3;
+    } catch (e) {
+      console.warn("List C failed:", e?.message || e);
+    }
+
+    // If everything failed or DB empty, show placeholders.
+    return PH;
   }
 
   async function fbMyOrdersClient(uid) {
